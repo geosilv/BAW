@@ -4,6 +4,9 @@ import math
 from scipy.optimize import fsolve
 from scipy.special import erf
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+
+from openpyxl import Workbook
 
 
 
@@ -15,6 +18,17 @@ def bs_call(S, K, T, r, q, sigma):
     df = np.exp(-r*T)
     F=S*np.exp((r-q)*T)
     return df*(F*N_d1 - K*N_d2)
+
+def black_call(F, K, T, r, b, sigma):
+    
+    d1 = (np.log(F / K) + (b + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    N_d1 = 0.5 * (1 + erf(d1 / np.sqrt(2)))
+    N_d2 = 0.5 * (1 + erf(d2 / np.sqrt(2)))
+    df = np.exp(-r*T)
+    return df*(F*N_d1 - K*N_d2)
+
+
 
 def bs_put(S, K, T, r, q, sigma):
     d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -60,9 +74,6 @@ def S_star_solution(S, K, T, r, q, sigma, phi):
     
     return fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, phi])
 
-
-
-
 def baw(S, S_star, K, T, r, q, sigma, phi):
     alpha=2*r/sigma**2
     beta=2*(r-q)/sigma**2
@@ -94,7 +105,6 @@ def baw(S, S_star, K, T, r, q, sigma, phi):
     return price
 
 
-
 def plot_boundary(S, K, r, q, sigma, phi):
     # Generate an array of time-to-maturities from a small positive number to 1 year
     T_values = np.linspace(0.1, 5, 100)
@@ -115,7 +125,7 @@ def plot_boundary(S, K, r, q, sigma, phi):
     plt.title('Early Exercise Boundary vs Time to Maturity')
    
     plt.grid(True)
-   
+    plt.show()
     
     return
     
@@ -126,6 +136,7 @@ def plot_bsvsbaw(S, K, r, q, sigma, phi):
    #     K_values = np.linspace(40,1,150)
     bs_values = []
     baw_values =[]  
+ 
     for T in T_values:
         bsprice = bs_call(S, K, T, r, q, sigma)
    #     print("S, K, T, r, q, sigma = ", S, K, "{:.2f}".format(T), r, q, sigma)
@@ -155,9 +166,11 @@ def plot_BSBAWS(S, K, r, q, sigma, phi):
     # Generate an array of time-to-mturities from a small positive number to 1 year
     S_values = np.linspace(10, 300, 300)
     bs_values = []
-    baw_values =[]  
+    baw_values =[] 
+    payoff = []
     if phi==1: 
         for S in S_values:
+            payoff.append(max(S-K,0))
             bscall = bs_call(S, K, T, r, q, sigma)
             bs_values.append(bscall)
             S_star = fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, 1])
@@ -170,21 +183,23 @@ def plot_BSBAWS(S, K, r, q, sigma, phi):
         
     elif phi==-1:
         for S in S_values:
+            payoff.append(max(K-S,0))
             bsput = bs_put(S, K, T, r, q, sigma)
             bs_values.append(bsput)
             S_star = fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, -1])
             S_star = S_star[0]
             bawput = baw(S, S_star, K, T, r, q, sigma, -1)
-            baw_values.append(bawput)          
+            baw_values.append(bawput) 
+            
         plt.figure()  
         plt.title('BS vs BAW PUT prices')
 
 
-
+    plt.plot(S_values, payoff, label='payoff', color = 'black')
     plt.plot(S_values, bs_values, label='BS prices', color = 'blue')
     plt.plot(S_values, baw_values, label='BAW prices', color='red' )
 
-    plt.xlabel('Time to Maturity (T)')
+    plt.xlabel('Underlying level (S)')
     plt.ylabel('Option prices')
   
     plt.legend()
@@ -193,20 +208,67 @@ def plot_BSBAWS(S, K, r, q, sigma, phi):
     
     return
 
+def plot_rates(S, K, r, q, sigma, phi):
+    # Generate an array of time-to-mturities from a small positive number to 1 year
+    S_values = np.linspace(10, 300, 300)
+    r_values = np.linspace(0.01, 0.1, 10)
+    
+    for r in r_values:
+        q=r 
+        if phi == 1: 
+            bs_subvalues = []
+            baw_subvalues = []
+            for S in S_values:
+                bscall = bs_call(S, K, T, r, q, sigma)/K
+                bs_subvalues.append(bscall)
+                S_star = fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, 1])
+                S_star = S_star[0]
+                bawcall = baw(S, S_star, K, T, r, q, sigma, 1)/K
+                baw_subvalues.append(bawcall)
 
+            diff = [a - b for a, b in zip(baw_subvalues, bs_subvalues)]
+            plt.plot(S_values, diff, label="r={:.1f}%".format(r*100))
+            plt.title('BAW CALL-BS CALL Prices for different levels of rates')
+            plt.legend()
+            plt.xlabel('Underlying level (S)')
+            plt.ylabel('Difference in Option Prices')
+            ax = plt.gca()  # get current axis
+            ax.yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
+        
+        elif phi == -1:
+            bs_subvalues = []
+            baw_subvalues = []
+            for S in S_values:
+                bsput = bs_put(S, K, T, r, q, sigma)
+                bs_subvalues.append(bsput)
+                S_star = fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, -1])
+                S_star = S_star[0]
+                bawput = baw(S, S_star, K, T, r, q, sigma, -1)
+                baw_subvalues.append(bawput)
+             
+            diff = [a - b for a, b in zip(baw_subvalues, bs_subvalues)]
+            plt.plot(S_values, diff, label="r={:.1f}%".format(r*100))
+            plt.title('BAW PUT-BS PUT Prices for different levels of rates')
+            plt.legend()
+            plt.xlabel('Underlying level (S)')
+            plt.ylabel('Difference in Option Prices')
+
+            
+    #plt.figure()  # create a new figure 
+
+
+    plt.grid(True)
+    plt.show()  # Show the plot     
+    
+    return
 
 # Example usage:
-S = 50  # Current stock price
+S = 100  # Current stock price
 K = 100  # Strike price
-T = 0.25  # Time to maturity in years
-r = 0.12 # Risk-free rate
-q = 0.16 # Dividend yield
+T = 2  # Time to maturity in years
+r = 0.08 # Risk-free rate
+q = 0.08 # Dividend yield
 sigma = 0.2  # Volatility
-
-#S_star_solution = fsolve(find_S_star2, K/10, args=[S, K, T, r, q, sigma])
-#S_star = S_star_solution[0]
-
-
 
 bscall = bs_call(S, K, T, r, q, sigma)
 S_star = S_star_solution(S, K, T, r, q, sigma,1)
@@ -224,9 +286,9 @@ print(f"The BAW price for an American put option is:", bawput, "S*=", S_star)
 #plot_boundary(S, K, r, q, sigma)
 
 #print("S_star=", S_star)
-#plot_boundary(S, K, r, q, sigma, 1)
-#plot_boundary(S, K, r, q, sigma, -1)
+plot_boundary(S, K, r, q, sigma, 1)
+# plot_boundary(S, K, r, q, sigma, -1)
 
-plot_BSBAWS(S, K, r, q, sigma, -1)
-plot_BSBAWS(S, K, r, q, sigma, 1)
-plt.show()
+# plot_BSBAWS(S, K, r, q, sigma, -1)
+# plot_BSBAWS(S, K, r, q, sigma, 1)
+plot_rates(S, K, r, q, sigma, 1)

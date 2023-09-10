@@ -1,13 +1,21 @@
 
 import numpy as np
 import math
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, newton, fmin_bfgs
 from scipy.special import erf
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
-
+from datetime import datetime, date
 from openpyxl import Workbook
 
+date_format = "%m/%d/%Y"
+a = datetime.strptime('8/18/2008', date_format)
+b = datetime.strptime('9/26/2008', date_format)
+d0 = date(2023, 8, 24)
+d1 = date(2028, 12, 15)
+delta = d1 - d0
+
+print(delta.days/365) 
 
 
 def bs_call(S, K, T, r, q, sigma):
@@ -69,10 +77,33 @@ def find_S_star(S_star, args):
     elif phi==-1:
         return bs_put(S_star, K, T, r, q, sigma)+A1(S_star,K, T, r, q, sigma,q1)  -(K-S_star)
 
+def find_S_star2(S_star, S, K, T, r, q, sigma ,phi):
+    alpha=2*r/sigma**2  #M
+    beta=2*(r-q)/sigma**2 #N
+    K1=1-np.exp(-r*T)
+    q2=(-(beta-1)+np.sqrt((beta-1)**2+(4*alpha/K1) ))/2
+    q1=(-(beta-1)-np.sqrt((beta-1)**2+(4*alpha/K1) ))/2   
+    if phi==1:
+        return bs_call(S_star, K, T, r, q, sigma)+A2(S_star,K, T, r, q, sigma,q2)  -(S_star-K)
+    elif phi==-1:
+        return bs_put(S_star, K, T, r, q, sigma)+A1(S_star,K, T, r, q, sigma,q1)  -(K-S_star)
+
+def find_S_star3(S_star, S, K, T, r, q, sigma ,phi):
+    alpha=2*r/sigma**2  #M
+    beta=2*(r-q)/sigma**2 #N
+    K1=1-np.exp(-r*T)
+    q2=(-(beta-1)+np.sqrt((beta-1)**2+(4*alpha/K1) ))/2
+    q1=(-(beta-1)-np.sqrt((beta-1)**2+(4*alpha/K1) ))/2   
+    if phi==1:
+        return np.absolute(bs_call(S_star, K, T, r, q, sigma)+A2(S_star,K, T, r, q, sigma,q2)  -(S_star-K))
+    elif phi==-1:
+        return np.absolute(bs_put(S_star, K, T, r, q, sigma)+A1(S_star,K, T, r, q, sigma,q1)  -(K-S_star))
 
 def S_star_solution(S, K, T, r, q, sigma, phi):
     
-    return fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, phi])
+    #return fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, phi], maxfev=20000, xtol=1e-10)
+    return newton(find_S_star2, 2500, args=(S, K, T, r, q, sigma, phi),  maxiter=200)
+    #return fmin_bfgs(find_S_star3, 8800, args=(S, K, T, r, q, sigma, phi))
 
 def baw(S, S_star, K, T, r, q, sigma, phi):
     alpha=2*r/sigma**2
@@ -125,7 +156,7 @@ def plot_boundary(S, K, r, q, sigma, phi):
     plt.title('Early Exercise Boundary vs Time to Maturity')
    
     plt.grid(True)
-    plt.show()
+   
     
     return
     
@@ -239,11 +270,11 @@ def plot_rates(S, K, r, q, sigma, phi):
             bs_subvalues = []
             baw_subvalues = []
             for S in S_values:
-                bsput = bs_put(S, K, T, r, q, sigma)
+                bsput = bs_put(S, K, T, r, q, sigma)/K
                 bs_subvalues.append(bsput)
                 S_star = fsolve(find_S_star, K, args=[S, K, T, r, q, sigma, -1])
                 S_star = S_star[0]
-                bawput = baw(S, S_star, K, T, r, q, sigma, -1)
+                bawput = baw(S, S_star, K, T, r, q, sigma, -1)/K
                 baw_subvalues.append(bawput)
              
             diff = [a - b for a, b in zip(baw_subvalues, bs_subvalues)]
@@ -252,9 +283,11 @@ def plot_rates(S, K, r, q, sigma, phi):
             plt.legend()
             plt.xlabel('Underlying level (S)')
             plt.ylabel('Difference in Option Prices')
+            ax = plt.gca()  # get current axis
+            ax.yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
 
             
-    #plt.figure()  # create a new figure 
+   # plt.figure()  # create a new figure 
 
 
     plt.grid(True)
@@ -263,32 +296,34 @@ def plot_rates(S, K, r, q, sigma, phi):
     return
 
 # Example usage:
-S = 100  # Current stock price
-K = 100  # Strike price
-T = 2  # Time to maturity in years
-r = 0.08 # Risk-free rate
-q = 0.08 # Dividend yield
-sigma = 0.2  # Volatility
+S = 4832.14614729 # Current fwd price
+K = 5100.0  # Strike price
+T = 5.315068493150685  # Time to maturity in years
+r = 0.040738058 # Risk-free rate
+q = r # Dividend yield
+sigma = 0.196989616  # Volatility
 
 bscall = bs_call(S, K, T, r, q, sigma)
-S_star = S_star_solution(S, K, T, r, q, sigma,1)
-bawcall = baw(S, S_star, K, T, r, q, sigma, 1) 
+S_star = S_star_solution(S, K, T, r, q, sigma,1.0)
+bawcall = baw(S, S_star, K, T, r, q, sigma, 1.0) 
+print(f"The exercise boundary is:", S_star)
 print(f"S, K, T, r, q, sigma = {S:.1f}, {K:.1f}, {T: .2f}, {r:.2f}, {q: .2f}, {sigma:.2f}")
-print(f"The BS  price for an European call option is: {bscall:.4f}")
-print(f"The BAW price for an American call option is:", bawcall, "S*=", S_star)
+print(f"The BS  price for an European call option is:", bscall/K)
+print(f"The BAW price for an American call option is:", bawcall/K, "S*=", S_star)
 
 bsput = bs_put(S, K, T, r, q, sigma)
-S_star = S_star_solution(S, K, T, r, q, sigma,-1)
-bawput = baw(S, S_star, K, T, r, q, sigma, -1) 
-print(f"The BS  price for an European put option is: {bsput:.4f}")
-print(f"The BAW price for an American put option is:", bawput, "S*=", S_star)
+S_star = S_star_solution(S, K, T, r, q, sigma,-1.0)
+bawput = baw(S, S_star, K, T, r, q, sigma, -1.0) 
+print(f"The BS  price for an European put option is", bsput/K)
+print(f"The BAW price for an American put option is:", bawput/K, "S*=", S_star)
 
 #plot_boundary(S, K, r, q, sigma)
 
 #print("S_star=", S_star)
-plot_boundary(S, K, r, q, sigma, 1)
+#plot_boundary(S, K, r, q, sigma, 1)
+#plt.show()
 # plot_boundary(S, K, r, q, sigma, -1)
 
 # plot_BSBAWS(S, K, r, q, sigma, -1)
 # plot_BSBAWS(S, K, r, q, sigma, 1)
-plot_rates(S, K, r, q, sigma, 1)
+#plot_rates(S, K, r, q, sigma, -1)
